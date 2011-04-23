@@ -156,7 +156,7 @@ function uc_price_per_role_settings_form_submit($form, &$form_state) {
  * Implements hook_form_alter().
  */
 function uc_price_per_role_form_alter(&$form, $form_state, $form_id) {
-  if ($form_id == 'product_node_form') {
+  if ($form_id == 'product_node_form' or $form_id == 'new_node_form') {
     $enabled = variable_get('uc_price_per_role_enabled', array());
     $enabled_roles = array_filter($enabled);
 
@@ -174,13 +174,13 @@ function uc_price_per_role_form_alter(&$form, $form_state, $form_id) {
     );
     
     
-	$sign_flag = variable_get('uc_sign_after_amount', FALSE);
+  $sign_flag = variable_get('uc_sign_after_amount', FALSE);
     $currency_sign = variable_get('uc_currency_sign', '$');
-	
+  
     if(isset($form['#node']->role_prices)) {
         $role_prices = $form['#node']->role_prices;
     }
-	
+  
     foreach (user_roles() as $rid => $role) {
       if ($enabled[$rid]) {
         $form['base']['role_prices'][$rid] = array(
@@ -293,21 +293,29 @@ function uc_price_per_role_node_validate($node, $form, &$form_state) {
  * Implements hook_node_load().
  */
 function uc_price_per_role_node_load($nodes, $types) {
-    $result = db_query("SELECT nid, rid, price FROM {uc_price_per_role_prices} WHERE vid IN(:vids)", 
-      array(':vids' => array_keys($nodes)));
-      foreach ($result as $key => $row) {
-        
-        $nodes[$row->nid]->role_prices[$row->rid] = $row->price;
-      }
+  $node_array = array();
+  
   foreach ($nodes as $node) {
+    if (in_array($node->type, uc_product_types())) {
+      $node_array[$node->vid] = $node;
+    }
+  }
+  
+  if(!empty($node_array)) {
+    $result = db_query("SELECT nid, rid, price FROM {uc_price_per_role_prices} WHERE vid IN(:vids)", 
+    array(':vids' => array_keys($node_array)));
+    foreach ($result as $key => $row) {
+      $node_array[$row->nid]->role_prices[$row->rid] = $row->price;
+    }
+    foreach ($node_array as $node) {
       $original_price = $node->sell_price;
       $price = uc_price_per_role_find_price($node->role_prices);
       if ($price !== FALSE) {
         $node->sell_price = $price;
       }
       $node->roleindependent_sell_price = $original_price;
+    }
   }
-  
 }
 
 /**
