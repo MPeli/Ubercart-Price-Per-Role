@@ -1,0 +1,13 @@
+; $Id: uc_price_per_role.info,v 1.2 2009/09/18 13:17:06 longwave Exp $
+name = Price per role
+description = Allow Ubercart products to have role-specific pricing.
+dependencies[] = uc_product
+package = Ubercart - extra
+core = 7.x
+
+; Information added by drupal.org packaging script on 2010-11-12
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "uc_price_per_role"
+datestamp = "1289564684"
+

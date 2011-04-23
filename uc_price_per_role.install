@@ -1,0 +1,94 @@
+<?php
+// $Id: uc_price_per_role.install,v 1.5 2010/03/12 13:44:33 longwave Exp $
+
+/**
+ * @file
+ * Something
+ *
+ * 
+ * 
+ */
+
+
+/**
+ * Implements hook_schema().
+ */
+function uc_price_per_role_schema() {
+  $schema = array();
+
+  $schema['uc_price_per_role_prices'] = array(
+    'description' => t('Ubercart price per role'),
+    'fields' => array(
+      'rpid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'vid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'rid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'price' => array(
+        'type' => 'numeric',
+        'precision' => 16,
+        'scale' => 5,
+        'not null' => TRUE,
+        'default' => 0.0,
+      ),
+    ),
+    'primary key' => array('rpid'),
+  );
+
+  $schema['uc_price_per_role_option_prices'] = array(
+    'description' => t('Ubercart price per role option prices'),
+    'fields' => array(
+      'opid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'oid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'rid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'price' => array(
+        'type' => 'numeric',
+        'precision' => 16,
+        'scale' => 5,
+        'not null' => TRUE,
+        'default' => 0.0,
+      ),
+    ),
+    'primary key' => array('opid'),
+  );
+
+  return $schema;
+}

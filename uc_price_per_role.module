@@ -1,0 +1,650 @@
+<?php
+// $Id: uc_price_per_role.module,v 1.10 2010/10/23 21:34:22 longwave Exp $
+
+/**
+ * Implements hook_permission().
+ */
+function uc_price_per_rolepermission() {
+  return array(
+    'administer price per role' => array(
+      'title' => t('access price selection block'),
+      'description' => t('Allows a user to configure...'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function uc_price_per_role_menu() {
+  $items = array();
+
+  $items['admin/store/settings/price_per_role'] = array(
+    'title' => 'Price per role settings',
+    'description' => 'Configure price per role settings.',
+    'access arguments' => array('administer store'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('uc_price_per_role_settings_form'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  if (module_exists('uc_attribute')) {
+    $items['node/%node/edit/option_prices'] = array(
+      'title' => 'Option prices',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('uc_price_per_role_option_prices_form', 1),
+      'access callback' => 'uc_attribute_product_option_access',
+      'access arguments' => array(1),
+      'type' => MENU_LOCAL_TASK,
+      'weight' => 3,
+    );
+  }
+
+  return $items;
+}
+function uc_price_per_role_admin_paths() {
+  $paths = array(
+    'node/*/edit/option_prices' => TRUE
+  );
+
+  return $paths;
+}
+/**
+ * Implements hook_menu_alter().
+ */
+function uc_price_per_role_menu_alter(&$items) {
+  // Make room in local menu for the 'Option prices' tab.
+  if (module_exists('uc_attribute')) {
+    $items['node/%node/edit/adjustments']['weight'] = $items['node/%node/edit/adjustments']['weight'] + 1;
+  }
+  if (isset($items['node/%node/edit/features'])) {
+    $items['node/%node/edit/features']['weight'] = $items['node/%node/edit/features']['weight'] + 1;
+  }
+}
+
+
+/**
+ * Implements hook_theme().
+ */
+function uc_price_per_role_theme() {
+  return array(
+    'uc_price_per_role_settings_form' =>  array(
+      'file' => 'uc_price_per_role.module',
+      'render element' => 'form'      
+    ),
+    'uc_price_per_role_product_prices' => array(
+      'file' => 'uc_price_per_role.module',
+      'render element' => 'prices'
+    ),
+    'uc_price_per_role_option_prices_form' => array(
+      'file' => 'uc_price_per_role.module',
+      'render element' => 'form'
+    ),
+  );
+}
+
+function uc_price_per_role_settings_form() {
+  $enabled = variable_get('uc_price_per_role_enabled', array());
+  $weights = variable_get('uc_price_per_role_weights', array());
+  $roles = user_roles();
+  
+  foreach (array_keys($roles) as $rid) {
+    if (!isset($weights[$rid])) {
+      $weights[$rid] = 0;
+    }
+  }
+  asort($weights);
+
+  $form['fields']['#tree'] = TRUE;
+  foreach ($weights as $rid => $weight) {
+    $form['fields'][$rid]['role'] = array(
+      '#type' => 'markup',
+      '#markup' => $roles[$rid],
+    );
+    $form['fields'][$rid]['enabled'] = array(
+      '#type' => 'checkbox',
+      '#default_value' => $enabled[$rid],
+    );
+    $form['fields'][$rid]['weight'] = array(
+      '#type' => 'weight',
+      '#delta' => 5,
+      '#default_value' => $weight,
+      '#attributes' => array('class' => array('role-weight'))
+    );
+  }
+
+  $form['buttons']['submit'] = array('#type' => 'submit', '#value' => t('Save configuration') );
+  return $form;
+}
+
+function theme_uc_price_per_role_settings_form($variables) {
+  $form = $variables['form'];
+  
+  $output = '<p>' . t('Enable roles that require separate pricing. For users with more than one matching role, the lightest weight role that has a price available will be used.') . '</p>';
+  
+  $header = array(t('Enable'), t('Role'), t('Weight'));
+  $rows = array();
+  foreach (element_children($form['fields']) as $field) {
+    $row = array();
+    $row[] = drupal_render($form['fields'][$field]['enabled']);
+    $row[] = drupal_render($form['fields'][$field]['role']);
+    $row[] = drupal_render($form['fields'][$field]['weight']);
+    $rows[] = array('data' => $row, 'class' => array('draggable'));
+  }
+  
+  drupal_add_tabledrag('uc-price-per-roles', 'order', 'sibling', 'role-weight');
+  $output .= theme('table', array('header' => $header, 'rows' => $rows, 'attributes' => array('id' => 'uc-price-per-roles')));
+
+  $output .= drupal_render_children($form);
+
+  return $output;
+}
+
+function uc_price_per_role_settings_form_submit($form, &$form_state) {
+  $enabled = array();
+  $weights = array();
+
+  foreach ($form_state['values']['fields'] as $rid => $field) {
+    $enabled[$rid] = $field['enabled'];
+    $weights[$rid] = $field['weight'];
+  }
+
+  variable_set('uc_price_per_role_enabled', $enabled);
+  variable_set('uc_price_per_role_weights', $weights);
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function uc_price_per_role_form_alter(&$form, $form_state, $form_id) {
+  if ($form_id == 'product_node_form') {
+    $enabled = variable_get('uc_price_per_role_enabled', array());
+    $enabled_roles = array_filter($enabled);
+
+    // If there is an enabled role, change the label on the core Ubercart sell
+    // price to indicate it is now the default price.
+    if (!empty($enabled_roles)) {
+      $form['base']['prices']['sell_price']['#title'] = t('Default sell price');
+      $form['base']['prices']['sell_price']['#description'] = t('Default customer purchase price.');
+    }
+    
+    $form['base']['role_prices'] = array(
+      '#weight' => 6,
+       '#theme' => 'uc_price_per_role_product_prices',
+      '#tree' => TRUE,
+    );
+    
+    
+	$sign_flag = variable_get('uc_sign_after_amount', FALSE);
+    $currency_sign = variable_get('uc_currency_sign', '$');
+	
+    if(isset($form['#node']->role_prices)) {
+        $role_prices = $form['#node']->role_prices;
+    }
+	
+    foreach (user_roles() as $rid => $role) {
+      if ($enabled[$rid]) {
+        $form['base']['role_prices'][$rid] = array(
+          '#type' => 'textfield',
+          '#title' => t('%role price', array('%role' => $role)),
+          '#required' => FALSE,
+          '#default_value' => isset($role_prices[$rid]) ? uc_store_format_price_field_value($role_prices[$rid]) : '',
+          '#description' => t('Purchase price for %role users.', array('%role' => $role)),
+          '#size' => 15,
+          '#maxlength' => 15,
+          '#field_prefix' => $sign_flag ? '' : $currency_sign,
+          '#field_suffix' => $sign_flag ? $currency_sign : '',
+        );
+      }
+    }
+  }
+ elseif ($form_id === 'uc_object_options_form') {
+    $form['uc_price_per_role_note'] = array(
+      '#markup' => '<p>' . t('Note: "Price" column is the default option price. To set option prices per role use the <a href="@link">options prices form</a>.', array('@link' => url('node/' . $form['id']['#value'] . '/edit/option_prices'))) . '</p>',
+    );
+  }
+
+
+  elseif (strpos($form_id, 'add_to_cart_form')) {
+    // Modify product form attribute option prices.
+    $format = variable_get('uc_attribute_option_price_format', 'adjustment');
+    if (module_exists('uc_attribute') && $format != 'none') {
+      $nid = intval($form['nid']['#value']);
+      $product = node_load($nid);
+      $qty = intval($form['qty']['#value']);
+      if (!$qty) {
+        $qty = 1;
+      }
+
+      $priced_attributes = uc_attribute_priced_attributes($nid);
+      $role_prices = uc_price_per_role_load_option_prices($nid);
+
+      foreach (element_children($form['attributes']) as $aid) {
+        if (isset($form['attributes'][$aid]['#options'])) {
+          $attribute = uc_attribute_load($aid, $nid, 'product');
+
+          $context = array(
+            'revision' => 'altered',
+            'type' => 'product',
+            'subject' => array(
+              'node' => $product,
+            ),
+            'field' => 'price',
+          );
+          $product_price = $product->sell_price;
+
+          foreach (array_keys($form['attributes'][$aid]['#options']) as $oid) {
+            $price = uc_price_per_role_find_price($role_prices[$oid]);
+
+            if ($price !== FALSE) {
+              $context = array(
+                'revision' => 'formatted',
+                'type' => 'attribute_option',
+                'subject' => array(
+                  'attribute' => $attribute,
+                  'option' => $attribute->options[$oid],
+                ),
+                'field' => 'price',
+              );
+
+              switch ($format) {
+                case 'total':
+                  $display_price = in_array($aid, $priced_attributes) ? ', ' . (($product_price + $price) * $qty) : '';
+                  if (count($priced_attributes) == 1) {
+                    break;
+                  }
+                case 'adjustment':
+                  $display_price = ($price != 0 ? ', ' . ($price > 0 ? '+' : '') . $price * $qty : '');
+                  break;
+              }
+
+              $form['attributes'][$aid]['#options'][$oid] = $attribute->options[$oid]->name . $display_price;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+function theme_uc_price_per_role_product_prices($variables) {
+  $prices = $variables['prices'];
+
+  $output = '<table><tr>';
+  foreach (element_children($prices) as $rid) {
+    $output .= '<td>' . drupal_render($prices[$rid]) . '</td>';
+  }
+  $output .= "</table>\n";
+  return $output;
+}
+
+/**
+ * Implements hook_node_validate().
+ */
+function uc_price_per_role_node_validate($node, $form, &$form_state) {
+  if (isset($node->role_prices)) {
+    foreach ($node->role_prices as $rid => $price) {
+      if (!empty($price) && !is_numeric($price)) {
+        form_set_error('role_prices][' . $rid, t('Price must be a number.'));
+      }
+    }
+  }  
+}
+/**
+ * Implements hook_node_load().
+ */
+function uc_price_per_role_node_load($nodes, $types) {
+    $result = db_query("SELECT nid, rid, price FROM {uc_price_per_role_prices} WHERE vid IN(:vids)", 
+      array(':vids' => array_keys($nodes)));
+      foreach ($result as $key => $row) {
+        
+        $nodes[$row->nid]->role_prices[$row->rid] = $row->price;
+      }
+  foreach ($nodes as $node) {
+      $original_price = $node->sell_price;
+      $price = uc_price_per_role_find_price($node->role_prices);
+      if ($price !== FALSE) {
+        $node->sell_price = $price;
+      }
+      $node->roleindependent_sell_price = $original_price;
+  }
+  
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function uc_price_per_role_node_insert($node) {
+  db_query("DELETE FROM {uc_price_per_role_prices} WHERE nid = :nid", array(':nid' => $node->nid));
+  if (is_array($node->role_prices)) {
+    foreach ($node->role_prices as $rid => $price) {
+      if (is_numeric($price)) {
+        db_query("INSERT INTO {uc_price_per_role_prices} (vid, nid, rid, price) VALUES (:vid, :nid, :rid, :price)", array(':vid' => $node->vid, ':nid' => $node->nid, ':rid' => $rid, ':price' => $price));
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_node_prepare().
+ */
+ 
+function uc_price_per_role_node_prepare($node) {
+  if(isset($node->roleindependent_sell_price)) {
+     // Reload original price for editing.
+    $node->sell_price = $node->roleindependent_sell_price;
+  }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function uc_price_per_role_node_update($node) {
+  db_query("DELETE FROM {uc_price_per_role_prices} WHERE nid = :nid", array(':nid' => $node->nid));
+  if (is_array($node->role_prices)) {
+    foreach ($node->role_prices as $rid => $price) {
+      if (is_numeric($price)) {
+        db_query("INSERT INTO {uc_price_per_role_prices} (vid, nid, rid, price) VALUES (:vid, :nid, :rid, :price)", array(':vid' => $node->vid, ':nid' => $node->nid, ':rid' => $rid, ':price' => $price));
+      }
+    }
+  }
+}
+
+/**
+ * Find the price for the current user from the supplied price array.
+ * 
+ * Will return FALSE if no price was found.
+ */
+function uc_price_per_role_find_price($prices) {
+  global $user;
+
+  $enabled = variable_get('uc_price_per_role_enabled', array());
+  $weights = variable_get('uc_price_per_role_weights', array());
+  asort($weights);
+
+  // Check for a chosen role in the price selection block first.
+  if (user_access('access price selection block') && isset($_SESSION['price_role']) && isset($prices[$_SESSION['price_role']])) {
+    return $prices[$_SESSION['price_role']];
+  }
+
+  // Otherwise, look for a matching role.
+  foreach ($weights as $rid => $weight) {
+    if (isset($user->roles[$rid]) && $enabled[$rid] && isset($prices[$rid])) {
+      return $prices[$rid];
+    }
+  }
+
+  return FALSE;
+}
+
+/**
+ * Implements hook_uc_cart_item().
+ */
+function uc_price_per_role_uc_cart_item($op, $item) {
+  if (module_exists('uc_attribute')) {
+    switch ($op) {
+      case 'load':
+        $role_prices = uc_price_per_role_load_option_prices($item->nid);
+        foreach (_uc_cart_product_get_options($item) as $option) {
+          $oid = $option['oid'];
+          $price = uc_price_per_role_find_price($role_prices[$oid]);
+          if ($price !== FALSE) {
+            $item->price += $price - $option['price'];
+          }
+        }
+    }
+  }
+}
+
+function uc_price_per_role_option_prices_form($form, &$form_state, $object) {
+ 
+  drupal_set_title(check_plain($object->title));
+
+  $role_prices = uc_price_per_role_load_option_prices($object->nid);
+  $enabled = array_keys(array_filter(variable_get('uc_price_per_role_enabled', array())));
+  
+  $form['help'] = array(
+    '#markup' => t('Leave any box blank to use the default price for the option.'),
+  );
+  
+  foreach (uc_product_get_attributes($object->nid) as $aid => $attribute) {
+    $form['attributes'][$aid]['name'] = array(
+      '#markup' => $attribute->name,
+    );
+    $form['attributes'][$aid]['aid'] = array(
+      '#type' => 'hidden',
+      '#value' => $attribute->aid,
+    );
+    $form['attributes'][$aid]['ordering'] = array(
+      '#type' => 'value',
+      '#value' => $attribute->ordering,
+    );
+
+    $form['attributes'][$aid]['options'] = array('#weight' => 2);
+
+    $context = array(
+      'type' => 'attribute_option',
+      'subject' => array(
+        'attribute' => $attribute,
+      ),
+      'field' => 'price',
+    );
+
+    $base_attr = uc_attribute_load($attribute->aid);
+
+    if ($base_attr->options) {
+      $result = db_query("
+        SELECT ao.aid, ao.oid, ao.name, ao.price AS default_price, ao.ordering AS default_ordering, po.price, po.ordering, po.ordering IS NULL AS null_order FROM {uc_attribute_options} AS ao
+        LEFT JOIN {uc_product_options} AS po ON ao.oid = po.oid AND po.nid = :nid
+        WHERE aid = :aid ORDER BY null_order, po.ordering, default_ordering, ao.name", array(':nid' => $object->nid, ':aid' => $attribute->aid));
+        
+      foreach ($result as $option) {
+        $oid = $option->oid;
+
+        $context['revision'] = 'themed';
+        $context['subject']['option'] = $option;
+        $price = is_null($option->price) ? $option->default_price : $option->price;
+
+        $form['attributes'][$aid]['options'][$oid]['name'] = array(
+          '#markup' => $option->name,
+        );
+
+        $form['attributes'][$aid]['options'][$oid]['price'] = array(
+          '#markup' => $price,
+        );
+        // Include unformatted original price to simplify form alteration.
+        $context['revision'] = 'original';
+        $form['attributes'][$aid]['options'][$oid]['price_value'] = array(
+          '#type' => 'value',
+          '#value' => $price,
+        );
+
+        foreach ($enabled as $rid) {
+          $form['attributes'][$aid]['options'][$oid]['role_prices'][$rid] = array(
+            '#type' => 'textfield',
+            '#default_value' => isset($role_prices[$oid][$rid]) ? uc_store_format_price_field_value($role_prices[$oid][$rid]) : '',
+            '#size' => 6,
+          );
+        }
+      }
+    }
+    else {
+      $form['attributes'][$aid]['default'] = array(
+        '#value' => t('This attribute does not have any options.'),
+      );
+    }
+  }
+
+  if (!empty($form['attributes'])) {
+    $form['attributes']['#tree'] = TRUE;
+
+    $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Submit'),
+      '#weight' => 10,
+    );
+  }
+
+  $form['nid'] = array(
+    '#type' => 'value',
+    '#value' => $object->nid,
+  );
+  return $form;
+}
+
+/**
+ * Display the option form.
+ *
+ * @ingroup themeable
+ * @see uc_object_options_form()
+ */
+function theme_uc_price_per_role_option_prices_form($variables) {
+  $form = $variables['form'];
+
+  $roles = user_roles();
+  $enabled = array_keys(array_filter(variable_get('uc_price_per_role_enabled', array())));
+
+  $header = array(t('Attribute'), t('Option'), t('Default price'));
+  foreach ($enabled as $rid) {
+    $header[] = t('%role price', array('%role' => $roles[$rid]));
+  }
+
+  foreach (element_children($form['attributes']) as $key) {
+    $row = array();
+    $row[] = array('data' => drupal_render($form['attributes'][$key]['aid']) . drupal_render($form['attributes'][$key]['name']), 'class' => 'attribute');
+
+    if (element_children($form['attributes'][$key]['options'])) {
+      foreach (element_children($form['attributes'][$key]['options']) as $oid) {
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['name']);
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['price']);
+        foreach ($enabled as $rid) {
+          $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['role_prices'][$rid]);
+        }
+
+        $rows[] = $row;
+        $row = array('');
+      }
+      unset($form['attributes'][$key]['default']);
+    }
+    else {
+      $row[] = array('data' => drupal_render($form['attributes'][$key]['default']), 'colspan' => count($enabled) + 3);
+      $rows[] = $row;
+    }
+
+    $rows[] = array(array('data' => '<hr />', 'colspan' => count($enabled) + 3));
+  }
+
+  if (count($rows) == 0) {
+    $rows[] = array(
+      array('data' => t('This product does not have any attributes.'), 'colspan' => count($enabled) + 3),
+    );
+  }
+
+  $output = drupal_render($form['help'])
+          . theme('table', array('header' => $header, 'rows' => $rows, 'attributes' => array('id' => 'product_attributes')))
+          . drupal_render_children($form);
+      
+  return $output;
+}
+ 
+/**
+ * Load per-role option price data for the supplied node ID.
+ */
+function uc_price_per_role_load_option_prices($nid) {
+  $prices = array();
+  $result = db_query("SELECT oid, rid, price FROM {uc_price_per_role_option_prices} WHERE nid = :nid", array(':nid' => $nid));
+  foreach ($result as $row) {
+    $prices[$row->oid][$row->rid] = $row->price;
+  }
+  return $prices;
+}
+/**
+ * Form submit handler to save option prices.
+ */
+function uc_price_per_role_option_prices_form_submit($form_id, &$form_state) {
+  foreach ($form_state['values']['attributes'] as $attribute) {
+    if (is_array($attribute['options'])) {
+      foreach ($attribute['options'] as $oid => $option) {
+        db_query("DELETE FROM {uc_price_per_role_option_prices} WHERE nid = :nid AND oid = :oid", array(':nid' => $form_state['values']['nid'], ':oid' => $oid));
+
+        foreach ($option['role_prices'] as $rid => $price) {
+          if (is_numeric($price)) {
+            $data = array(
+              'nid' => $form_state['values']['nid'],
+              'oid' => $oid,
+              'rid' => $rid,
+              'price' => $price,
+            );
+            drupal_write_record('uc_price_per_role_option_prices', $data);
+          }
+        }
+      }
+    }
+  }
+
+  drupal_set_message(t('The option prices have been saved.'));
+} 
+
+ /**
+ * Implements hook_block_info().
+ */
+function uc_price_per_role_block_info() {
+
+    $blocks[0]['info'] = t('Pricing selection');
+    return $blocks;
+}
+function uc_price_per_role_block_view($delta = 0) {
+  if ($delta == 0 && user_access('access price selection block')) {
+    $block = array(
+      'subject' => t('Pricing selection'),
+      'content' => drupal_get_form('uc_price_per_role_switch_form'),
+    );
+    return $block;
+  }
+}
+
+/**
+ * Form to allow authorised users to select which role is used for pricing.
+ */
+function uc_price_per_role_switch_form() {
+  $enabled = variable_get('uc_price_per_role_enabled', array());
+  $weights = variable_get('uc_price_per_role_weights', array());
+  $roles = user_roles();
+  asort($weights);
+
+  $options = array('' => 'Default');
+  foreach ($weights as $rid => $weight) {
+    if ($enabled[$rid]) {
+      $options[$rid] = $roles[$rid];
+    }
+  }
+
+  $form['role'] = array(
+    '#type' => 'select',
+    '#title' => 'Role',
+    '#options' => $options,
+    '#default_value' => $_SESSION['price_role'],
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Select pricing role'),
+  );
+
+  return $form;
+}
+
+/**
+ * Form submit handler to save price role selection.
+ */
+function uc_price_per_role_switch_form_submit($form_id, &$form_state) {
+  if (user_access('access price selection block')) {
+    $_SESSION['price_role'] = $form_state['values']['role'];
+  }
+}
+
+/**
+ * Implementation of hook_migrate_api().
+ */
+function uc_price_per_role_migrate_api() {
+  return array('api' => 1);
+}
