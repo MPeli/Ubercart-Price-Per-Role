@@ -4,7 +4,7 @@
 /**
  * Implements hook_permission().
  */
-function uc_price_per_rolepermission() {
+function uc_price_per_role_permission() {
   return array(
     'administer price per role' => array(
       'title' => t('access price selection block'),
