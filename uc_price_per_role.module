@@ -403,9 +403,11 @@ function uc_price_per_role_uc_cart_item($op, $item) {
         $role_prices = uc_price_per_role_load_option_prices($item->nid);
         foreach (_uc_cart_product_get_options($item) as $option) {
           $oid = $option['oid'];
-          $price = uc_price_per_role_find_price($role_prices[$oid]);
-          if ($price !== FALSE) {
-            $item->price += $price - $option['price'];
+          if (isset($role_prices[$oid])) {
+            $price = uc_price_per_role_find_price($role_prices[$oid]);
+            if ($price !== FALSE) {
+              $item->price += $price - $option['price'];
+            }
           }
         }
     }
