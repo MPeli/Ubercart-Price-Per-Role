@@ -4,7 +4,7 @@
 /**
  * Implements hook_permission().
  */
-function uc_price_per_rolepermission() {
+function uc_price_per_role_permission() {
   return array(
     'administer price per role' => array(
       'title' => t('access price selection block'),
@@ -123,12 +123,15 @@ function theme_uc_price_per_role_settings_form($variables) {
   
   $header = array(t('Enable'), t('Role'), t('Weight'));
   $rows = array();
-  foreach (element_children($form['fields']) as $field) {
-    $row = array();
-    $row[] = drupal_render($form['fields'][$field]['enabled']);
-    $row[] = drupal_render($form['fields'][$field]['role']);
-    $row[] = drupal_render($form['fields'][$field]['weight']);
-    $rows[] = array('data' => $row, 'class' => array('draggable'));
+
+  if (!empty($form['fields'])) {
+    foreach (element_children($form['fields']) as $field) {
+      $row = array();
+      $row[] = drupal_render($form['fields'][$field]['enabled']);
+      $row[] = drupal_render($form['fields'][$field]['role']);
+      $row[] = drupal_render($form['fields'][$field]['weight']);
+      $rows[] = array('data' => $row, 'class' => array('draggable'));
+    }
   }
   
   drupal_add_tabledrag('uc-price-per-roles', 'order', 'sibling', 'role-weight');
@@ -218,46 +221,48 @@ function uc_price_per_role_form_alter(&$form, $form_state, $form_id) {
       $priced_attributes = uc_attribute_priced_attributes($nid);
       $role_prices = uc_price_per_role_load_option_prices($nid);
 
-      foreach (element_children($form['attributes']) as $aid) {
-        if (isset($form['attributes'][$aid]['#options'])) {
-          $attribute = uc_attribute_load($aid, $nid, 'product');
-
-          $context = array(
-            'revision' => 'altered',
-            'type' => 'product',
-            'subject' => array(
-              'node' => $product,
-            ),
-            'field' => 'price',
-          );
-          $product_price = $product->sell_price;
-
-          foreach (array_keys($form['attributes'][$aid]['#options']) as $oid) {
-            $price = uc_price_per_role_find_price($role_prices[$oid]);
-
-            if ($price !== FALSE) {
-              $context = array(
-                'revision' => 'formatted',
-                'type' => 'attribute_option',
-                'subject' => array(
-                  'attribute' => $attribute,
-                  'option' => $attribute->options[$oid],
-                ),
-                'field' => 'price',
-              );
-
-              switch ($format) {
-                case 'total':
-                  $display_price = in_array($aid, $priced_attributes) ? ', ' . (($product_price + $price) * $qty) : '';
-                  if (count($priced_attributes) == 1) {
+      if (!empty($form['attributes'])) {
+        foreach (element_children($form['attributes']) as $aid) {
+          if (isset($form['attributes'][$aid]['#options'])) {
+            $attribute = uc_attribute_load($aid, $nid, 'product');
+  
+            $context = array(
+              'revision' => 'altered',
+              'type' => 'product',
+              'subject' => array(
+                'node' => $product,
+              ),
+              'field' => 'price',
+            );
+            $product_price = $product->sell_price;
+  
+            foreach (array_keys($form['attributes'][$aid]['#options']) as $oid) {
+              $price = uc_price_per_role_find_price($role_prices[$oid]);
+  
+              if ($price !== FALSE) {
+                $context = array(
+                  'revision' => 'formatted',
+                  'type' => 'attribute_option',
+                  'subject' => array(
+                    'attribute' => $attribute,
+                    'option' => $attribute->options[$oid],
+                  ),
+                  'field' => 'price',
+                );
+  
+                switch ($format) {
+                  case 'total':
+                    $display_price = in_array($aid, $priced_attributes) ? ', ' . (($product_price + $price) * $qty) : '';
+                    if (count($priced_attributes) == 1) {
+                      break;
+                    }
+                  case 'adjustment':
+                    $display_price = ($price != 0 ? ', ' . ($price > 0 ? '+' : '') . $price * $qty : '');
                     break;
-                  }
-                case 'adjustment':
-                  $display_price = ($price != 0 ? ', ' . ($price > 0 ? '+' : '') . $price * $qty : '');
-                  break;
+                }
+  
+                $form['attributes'][$aid]['#options'][$oid] = $attribute->options[$oid]->name . $display_price;
               }
-
-              $form['attributes'][$aid]['#options'][$oid] = $attribute->options[$oid]->name . $display_price;
             }
           }
         }
@@ -269,11 +274,14 @@ function uc_price_per_role_form_alter(&$form, $form_state, $form_id) {
 function theme_uc_price_per_role_product_prices($variables) {
   $prices = $variables['prices'];
 
-  $output = '<table><tr>';
-  foreach (element_children($prices) as $rid) {
-    $output .= '<td>' . drupal_render($prices[$rid]) . '</td>';
+  $output = '';
+  if (!empty($prices)) {
+    $output .= '<table><tr>';
+    foreach (element_children($prices) as $rid) {
+      $output .= '<td>' . drupal_render($prices[$rid]) . '</td>';
+    }
+    $output .= "</table>\n";
   }
-  $output .= "</table>\n";
   return $output;
 }
 
@@ -297,6 +305,7 @@ function uc_price_per_role_node_load($nodes, $types) {
   
   foreach ($nodes as $node) {
     if (in_array($node->type, uc_product_types())) {
+      $node->role_prices = array();
       $node_array[$node->vid] = $node;
     }
   }
@@ -516,29 +525,30 @@ function theme_uc_price_per_role_option_prices_form($variables) {
     $header[] = t('%role price', array('%role' => $roles[$rid]));
   }
 
-  foreach (element_children($form['attributes']) as $key) {
-    $row = array();
-    $row[] = array('data' => drupal_render($form['attributes'][$key]['aid']) . drupal_render($form['attributes'][$key]['name']), 'class' => 'attribute');
-
-    if (element_children($form['attributes'][$key]['options'])) {
-      foreach (element_children($form['attributes'][$key]['options']) as $oid) {
-        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['name']);
-        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['price']);
-        foreach ($enabled as $rid) {
-          $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['role_prices'][$rid]);
+  if (!empty($form['attributes'])) {
+    foreach (element_children($form['attributes']) as $key) {
+      $row = array();
+      $row[] = array('data' => drupal_render($form['attributes'][$key]['aid']) . drupal_render($form['attributes'][$key]['name']), 'class' => 'attribute');
+      if (!empty($form['attributes'][$key]['options']) && $children = element_children($form['attributes'][$key]['options'])) {
+        foreach ($children as $oid) {
+          $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['name']);
+          $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['price']);
+          foreach ($enabled as $rid) {
+            $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['role_prices'][$rid]);
+          }
+  
+          $rows[] = $row;
+          $row = array('');
         }
-
-        $rows[] = $row;
-        $row = array('');
+        unset($form['attributes'][$key]['default']);
       }
-      unset($form['attributes'][$key]['default']);
+      else {
+        $row[] = array('data' => drupal_render($form['attributes'][$key]['default']), 'colspan' => count($enabled) + 3);
+        $rows[] = $row;
+      }
+  
+      $rows[] = array(array('data' => '<hr />', 'colspan' => count($enabled) + 3));
     }
-    else {
-      $row[] = array('data' => drupal_render($form['attributes'][$key]['default']), 'colspan' => count($enabled) + 3);
-      $rows[] = $row;
-    }
-
-    $rows[] = array(array('data' => '<hr />', 'colspan' => count($enabled) + 3));
   }
 
   if (count($rows) == 0) {
